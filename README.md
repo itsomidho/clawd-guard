@@ -2,6 +2,8 @@
 
 A safety net for [Claude Code](https://claude.com/claude-code). Before Claude runs a shell command or writes a file, clawd-guard checks it. A risky call is either **blocked** or **put to you for approval**, with a one-line reason.
 
+![clawd-guard through one turn: a force-push to main blocked, a write to .env blocked, and a git reset --hard over uncommitted work put to the person, who declines; the band above the prompt counts each catch](docs/guard.gif)
+
 - **Shell:** `rm -rf` on `/`, home, the project or anything outside it · force-push to `main`/`master` · deleting a protected branch · `git reset --hard`, `git clean -f` or `git checkout -- .` while you have uncommitted changes · `DROP`, `TRUNCATE` and `DELETE` without `WHERE` · `chmod 777` · `curl … | sh`
 - **Files:** `.env*`, private keys, `.netrc` and `.git/` are never written. Lockfiles ask first.
 - **Secrets:** what Claude writes and what it commits (the staged diff) is scanned for AWS, GitHub, GitLab, Anthropic, OpenAI, Slack, Stripe, Google and npm keys, private keys and hard-coded passwords. The secret itself is never echoed back.
