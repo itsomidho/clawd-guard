@@ -1,0 +1,13 @@
+{
+  "rules": {
+    "sql-destructive": "deny",
+    "chmod-world-writable": "off"
+  },
+  "protectedBranches": ["main", "develop"],
+  "protect": [
+    { "pattern": "config/secrets/**", "action": "deny" },
+    { "pattern": "composer.lock", "action": "off" }
+  ],
+  "allowPaths": [".env.testing"],
+  "rmAllowPaths": ["/var/www/cache/**"]
+}

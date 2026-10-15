@@ -1,0 +1,20 @@
+export type GuardAction = 'deny' | 'ask'
+
+export type GuardHit = {
+  action: GuardAction
+  rule: string
+  summary: string
+  at: number
+}
+
+declare module 'claude-code' {
+  interface PluginState {
+    'clawd-guard': {
+      denied: number
+      asked: number
+      last: GuardHit | null
+      isBandHidden: boolean
+      isPaused: boolean
+    }
+  }
+}
