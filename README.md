@@ -1,5 +1,7 @@
 # clawd-guard
 
+[![Latest release](https://img.shields.io/github/v/release/itsomidho/clawd-guard?label=release&color=7fbeb3)](https://github.com/itsomidho/clawd-guard/releases)
+
 A safety net for [Claude Code](https://claude.com/claude-code). Before Claude runs a shell command or writes a file, clawd-guard checks it. A risky call is either **blocked** or **put to you for approval**, with a one-line reason.
 
 ![clawd-guard through one turn: a force-push to main blocked, a write to .env blocked, and a git reset --hard over uncommitted work put to the person, who declines; the band above the prompt counts each catch](docs/guard.gif)
