@@ -56,7 +56,7 @@ test('the band counts blocks, shows the last one and hides on Dismiss', async ($
     blocks += 1
     const ui = await $.ui.mount({ plugin: 'clawd-guard', surface, component: 'AbovePrompt', // Only the props the band reads; the rest are the engine's.
       props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } as never })
-    expect(await ui.find({ type: 'Text', text: /rm -r on \// })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /rm -rf? on \// })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: String(blocks) })).toBeDefined()
     await ui.press({ key: 'dismiss' })
     expect(await ui.find({ key: 'dismiss' })).toBeUndefined()

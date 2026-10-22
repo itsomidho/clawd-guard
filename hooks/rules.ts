@@ -36,6 +36,8 @@ export const DEFAULT_CONFIG: Config = {
     'sql-destructive': 'ask',
     'chmod-world-writable': 'ask',
     'pipe-to-shell': 'ask',
+    'wp-destructive': 'ask',
+    'docker-data-loss': 'ask',
     'protected-file': 'deny',
     'secret-high': 'deny',
     'secret-generic': 'ask',
@@ -229,7 +231,7 @@ export function splitCommands(line: string): string[][] {
   return commands
 }
 
-const WRAPPERS = new Set(['sudo', 'doas', 'command', 'builtin', 'exec', 'nohup', 'time', 'env', 'xargs'])
+const WRAPPERS = new Set(['sudo', 'doas', 'command', 'builtin', 'exec', 'nohup', 'time', 'env'])
 
 // Drops `sudo`, `env X=1` and the like so the command itself comes first.
 export function stripWrappers(words: readonly string[]): string[] {
@@ -258,7 +260,9 @@ function expandHome(word: string, home: string | undefined): string {
   return word
 }
 
-function checkRm(config: Config, args: string[], ctx: ShellContext): Verdict | null {
+type RmArgs = { isRecursive: boolean; isForce: boolean; targets: string[] }
+
+function parseRm(args: readonly string[]): RmArgs {
   let isRecursive = false
   let isForce = false
   const targets: string[] = []
@@ -273,7 +277,18 @@ function checkRm(config: Config, args: string[], ctx: ShellContext): Verdict | n
       if (a.includes('f')) isForce = true
     } else targets.push(a)
   }
+  return { isRecursive, isForce, targets }
+}
+
+function checkRm(config: Config, args: string[], ctx: ShellContext): Verdict | null {
+  const { isRecursive, isForce, targets } = parseRm(args)
   if (!isRecursive) return null
+  return checkTreeTargets(config, targets, ctx, `rm -r${isForce ? 'f' : ''}`)
+}
+
+// Whether deleting whole trees at these paths is safe: denied for /, home or
+// the project root, asked outside the project or on a variable.
+function checkTreeTargets(config: Config, targets: readonly string[], ctx: ShellContext, what: string): Verdict | null {
   const verdicts: (Verdict | null)[] = []
   for (const raw of targets) {
     const expanded = expandHome(raw, ctx.home)
@@ -282,17 +297,17 @@ function checkRm(config: Config, args: string[], ctx: ShellContext): Verdict | n
       (ctx.home !== undefined && normalize(expanded.replace(/\/\*$/, '')) === normalize(ctx.home)) ||
       (expanded.startsWith('/') && normalize(expanded.replace(/\/\*$/, '')) === normalize(ctx.root))
     if (isRootish) {
-      verdicts.push(verdict(config, 'rm-rf-root', `rm -r on ${raw} would delete a whole tree (/, home or the project)`, 'deny'))
+      verdicts.push(verdict(config, 'rm-rf-root', `${what} on ${raw} would delete a whole tree (/, home or the project)`, 'deny'))
       continue
     }
     if (raw.includes('$') && !raw.startsWith('$HOME') && !raw.startsWith('${HOME}')) {
-      verdicts.push(verdict(config, 'rm-rf-outside', `rm -r on ${raw}: a variable that may expand anywhere`))
+      verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${raw}: a variable that may expand anywhere`))
       continue
     }
     const abs = normalize(expanded.startsWith('/') ? expanded : ctx.cwd + '/' + expanded)
     if (isInside(abs, ctx.root)) continue
     if (config.rmAllowPaths.some(p => matchesGlob(p, abs, ctx.root))) continue
-    verdicts.push(verdict(config, 'rm-rf-outside', `rm -r${isForce ? 'f' : ''} on ${raw}, outside the project`))
+    verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${raw}, outside the project`))
   }
   return strictest(verdicts)
 }
@@ -343,11 +358,133 @@ function checkGit(config: Config, args: string[], ctx: ShellContext): Verdict | 
   return null
 }
 
+// `find <paths> … -delete` or `-exec rm -r …`: the paths it searches are
+// what it may delete. Without a path, find searches the current folder.
+const FIND_OPTIONS = new Set(['-H', '-L', '-P'])
+
+function findPaths(args: readonly string[]): string[] {
+  const paths: string[] = []
+  for (const a of args) {
+    if (FIND_OPTIONS.has(a) || a.startsWith('-D') || a.startsWith('-O')) continue
+    if (a.startsWith('-') || a === '!' || a === '(') break
+    paths.push(a)
+  }
+  return paths.length > 0 ? paths : ['.']
+}
+
+function checkFind(config: Config, args: string[], ctx: ShellContext): Verdict | null {
+  const execAt = args.findIndex(a => a === '-exec' || a === '-execdir' || a === '-ok' || a === '-okdir')
+  const execWords = execAt >= 0 ? stripWrappers(args.slice(execAt + 1)) : []
+  const execsRm = basename(execWords[0] ?? '') === 'rm' && parseRm(execWords.slice(1).filter(w => w !== '{}' && w !== '+' && w !== ';')).isRecursive
+  if (!args.includes('-delete') && !execsRm) return null
+  return checkTreeTargets(config, findPaths(args), ctx, args.includes('-delete') ? 'find -delete' : 'find -exec rm -r')
+}
+
+// xargs options that take a value as the next word.
+const XARGS_VALUE_OPTIONS = new Set(['-I', '-n', '-P', '-d', '-L', '-s', '-E', '-a', '--max-args', '--max-procs', '--delimiter', '--arg-file'])
+
+function skipXargsOptions(args: readonly string[]): string[] {
+  let i = 0
+  while (i < args.length && (args[i] ?? '').startsWith('-')) i += XARGS_VALUE_OPTIONS.has(args[i] ?? '') ? 2 : 1
+  return args.slice(i)
+}
+
+// `… | xargs rm -r`: the targets arrive on stdin. From `find <paths>`, they
+// lie under those paths; from anything else, they could be anywhere.
+function checkXargsRm(config: Config, rmArgs: string[], before: readonly string[] | undefined, ctx: ShellContext): Verdict | null {
+  const rm = parseRm(rmArgs)
+  if (!rm.isRecursive) return null
+  const fixed = checkTreeTargets(config, rm.targets, ctx, 'xargs rm -r')
+  const from = before !== undefined && before[before.length - 1] === '\u0000|' ? stripWrappers(before.slice(0, -1)) : undefined
+  if (from !== undefined && basename(from[0] ?? '') === 'find') {
+    return strictest([fixed, checkTreeTargets(config, findPaths(from.slice(1)), ctx, 'find | xargs rm -r')])
+  }
+  return strictest([fixed, verdict(config, 'rm-rf-outside', 'xargs rm -r deletes paths read from input, which could be anywhere')])
+}
+
+// WP-CLI commands that wipe or rewrite the database, run directly or through
+// docker, ddev, lando or vendor/bin/wp.
+function checkWp(config: Config, args: readonly string[]): Verdict | null {
+  const [group, sub] = args.filter(a => !a.startsWith('-'))
+  const isDry = args.includes('--dry-run') || args.some(a => a === '--export' || a.startsWith('--export='))
+  let what: string | null = null
+  if (group === 'db' && (sub === 'reset' || sub === 'drop' || sub === 'clean')) what = `wp db ${sub} deletes the database's tables`
+  else if (group === 'db' && sub === 'import') what = 'wp db import overwrites the database'
+  else if (group === 'site' && (sub === 'empty' || sub === 'delete')) what = `wp site ${sub} deletes the site's content`
+  else if (group === 'search-replace' && !isDry) what = 'wp search-replace rewrites the database (no --dry-run or --export)'
+  return what === null ? null : verdict(config, 'wp-destructive', what)
+}
+
+const WP_RUNNERS = new Set(['docker', 'docker-compose', 'podman', 'ddev', 'lando', 'kubectl'])
+
+function wpArgs(name: string, words: readonly string[]): string[] | null {
+  if (name === 'wp') return words.slice(1)
+  if (!WP_RUNNERS.has(name)) return null
+  const at = words.findIndex((w, i) => i > 0 && basename(w) === 'wp')
+  return at > 0 ? words.slice(at + 1) : null
+}
+
+// Docker and friends deleting volumes: a local site's database lives there.
+function checkDocker(config: Config, name: string, args: readonly string[]): Verdict | null {
+  const say = (what: string) => verdict(config, 'docker-data-loss', what)
+  const words = args.filter(a => !a.startsWith('-'))
+  const hasVolumesFlag = args.some(a => a === '--volumes' || /^-[a-zA-Z]*v[a-zA-Z]*$/.test(a))
+  if (name === 'docker' || name === 'podman') {
+    if (words[0] === 'compose' && words.includes('down') && hasVolumesFlag) return say(`${name} compose down -v deletes the project's volumes, databases included`)
+    if (words[0] === 'volume' && (words[1] === 'rm' || words[1] === 'prune')) return say(`${name} volume ${words[1]} deletes volumes and their data`)
+    if (words[0] === 'system' && words[1] === 'prune' && args.includes('--volumes')) return say(`${name} system prune --volumes deletes unused volumes and their data`)
+  }
+  if (name === 'docker-compose' && words.includes('down') && hasVolumesFlag) return say('docker-compose down -v deletes the project\'s volumes, databases included')
+  if (name === 'ddev' && words[0] === 'delete') return say('ddev delete removes the project\'s database')
+  if (name === 'lando' && words[0] === 'destroy') return say('lando destroy removes the app and its database')
+  return null
+}
+
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh'])
+const MAX_DEPTH = 4
+
+// The script a shell runs with -c, e.g. `bash -lc "rm -rf ~"`.
+function shellScript(args: readonly string[]): string | null {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? ''
+    if (!a.startsWith('-')) return null
+    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) return args[i + 1] ?? null
+  }
+  return null
+}
+
+// Command substitutions, $(…) and `…`, run even inside double quotes.
+function substitutions(line: string): string[] {
+  const found: string[] = []
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '$' && line[i + 1] === '(') {
+      let depth = 1
+      let j = i + 2
+      for (; j < line.length && depth > 0; j++) {
+        if (line[j] === '(') depth++
+        else if (line[j] === ')') depth--
+      }
+      found.push(line.slice(i + 2, depth === 0 ? j - 1 : j))
+      i = j - 1
+    } else if (line[i] === '`') {
+      const end = line.indexOf('`', i + 1)
+      found.push(line.slice(i + 1, end < 0 ? line.length : end))
+      i = end < 0 ? line.length : end
+    }
+  }
+  return found
+}
+
 const SQL_DESTRUCTIVE = /\b(DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW)|TRUNCATE(\s+TABLE)?\s+\w|DELETE\s+FROM\s+[\w."`]+\s*(;|$|["'`]))/i
 const DROP_COMMANDS = new Set(['dropdb', 'dropuser'])
 
-export function checkBash(config: Config, line: string, ctx: ShellContext): Verdict | null {
+export function checkBash(config: Config, line: string, ctx: ShellContext, depth = 0): Verdict | null {
   const verdicts: (Verdict | null)[] = []
+  const inner = (script: string) => {
+    if (depth >= MAX_DEPTH) return verdict(config, 'rm-rf-outside', 'commands nested too deep to check')
+    return checkBash(config, script, ctx, depth + 1)
+  }
+  for (const sub of substitutions(line)) verdicts.push(inner(sub))
   const commands = splitCommands(line)
   for (let n = 0; n < commands.length; n++) {
     const raw = commands[n] ?? []
@@ -356,13 +493,25 @@ export function checkBash(config: Config, line: string, ctx: ShellContext): Verd
     if (words.length === 0) continue
     const name = basename(words[0] ?? '')
     const args = words.slice(1)
+    const wp = wpArgs(name, words)
+    if (wp !== null) verdicts.push(checkWp(config, wp))
     if (name === 'rm') verdicts.push(checkRm(config, args, ctx))
-    else if (name === 'git') verdicts.push(checkGit(config, args, ctx))
+    else if (name === 'find') verdicts.push(checkFind(config, args, ctx))
+    else if (name === 'xargs') {
+      const run = stripWrappers(skipXargsOptions(args))
+      if (basename(run[0] ?? '') === 'rm') verdicts.push(checkXargsRm(config, run.slice(1), commands[n - 1], ctx))
+      else if (run.length > 0) verdicts.push(inner(run.map(w => `'${w.replace(/'/g, `'\\''`)}'`).join(' ')))
+    } else if (name === 'eval') verdicts.push(inner(args.join(' ')))
+    else if (SHELLS.has(name) && shellScript(args) !== null) verdicts.push(inner(shellScript(args) ?? ''))
+    else if (name === 'docker' || name === 'podman' || name === 'docker-compose' || name === 'ddev' || name === 'lando') {
+      verdicts.push(checkDocker(config, name, args))
+    } else if (name === 'git') verdicts.push(checkGit(config, args, ctx))
     else if (name === 'chmod' && args.some(a => /^0?777$/.test(a) || /^(a|ugo|o)\+[rwx]*w/.test(a))) {
       verdicts.push(verdict(config, 'chmod-world-writable', `chmod ${args.join(' ')} makes files writable by everyone`))
     } else if (DROP_COMMANDS.has(name)) {
       verdicts.push(verdict(config, 'sql-destructive', `${name} drops a database object`))
-    } else if (['sh', 'bash', 'zsh', 'fish', 'dash'].includes(name) && n > 0) {
+    }
+    if (SHELLS.has(name) && n > 0) {
       const before = commands[n - 1] ?? []
       const from = basename(stripWrappers(before)[0] ?? '')
       if (before[before.length - 1] === '\u0000|' && (from === 'curl' || from === 'wget')) {

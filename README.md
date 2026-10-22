@@ -6,7 +6,8 @@ A safety net for [Claude Code](https://claude.com/claude-code). Before Claude ru
 
 ![clawd-guard through one turn: a force-push to main blocked, a write to .env blocked, and a git reset --hard over uncommitted work put to the person, who declines; the band above the prompt counts each catch](docs/guard.gif)
 
-- **Shell:** `rm -rf` on `/`, home, the project or anything outside it · force-push to `main`/`master` · deleting a protected branch · `git reset --hard`, `git clean -f` or `git checkout -- .` while you have uncommitted changes · `DROP`, `TRUNCATE` and `DELETE` without `WHERE` · `chmod 777` · `curl … | sh`
+- **Shell:** `rm -rf` on `/`, home, the project or anything outside it · force-push to `main`/`master` · deleting a protected branch · `git reset --hard`, `git clean -f` or `git checkout -- .` while you have uncommitted changes · `DROP`, `TRUNCATE` and `DELETE` without `WHERE` · `chmod 777` · `curl … | sh` · `wp db reset`, `wp search-replace` without `--dry-run` · `docker compose down -v` and other volume deletes
+- **Hidden commands:** what runs inside `bash -c "…"`, `eval`, `$(…)`, backticks and `xargs` is checked too, and `find -delete` counts as `rm -r` on the paths it searches.
 - **Files:** `.env*`, private keys, `.netrc` and `.git/` are never written. Lockfiles ask first.
 - **Secrets:** what Claude writes and what it commits (the staged diff) is scanned for AWS, GitHub, GitLab, Anthropic, OpenAI, Slack, Stripe, Google and npm keys, private keys and hard-coded passwords. The secret itself is never echoed back.
 - **Feedback:** a toast when something is stopped, plus a band above the prompt with the session's counters and the last block.
@@ -25,8 +26,8 @@ In Claude Code, type:
 
 | Rule | Default |
 |---|---|
-| `rm-rf-root`: `rm -r` on `/`, `~`, `$HOME` or the project root | deny |
-| `rm-rf-outside`: `rm -r` outside the project (`/tmp` is fine), or on a `$VARIABLE` | ask |
+| `rm-rf-root`: `rm -r` (or `find -delete`, `find -exec rm -r`) on `/`, `~`, `$HOME` or the project root | deny |
+| `rm-rf-outside`: the same outside the project (`/tmp` is fine), on a `$VARIABLE`, or `xargs rm -r` fed by anything but `find` | ask |
 | `git-force-push-protected`: force-push to a protected branch | deny |
 | `git-force-push`: any other force-push | ask |
 | `git-push-delete-protected`: `git push --delete main` | deny |
@@ -34,6 +35,8 @@ In Claude Code, type:
 | `sql-destructive`: DROP, TRUNCATE, DELETE without WHERE, `dropdb` | ask |
 | `chmod-world-writable`: `chmod 777`, `o+w` | ask |
 | `pipe-to-shell`: `curl`/`wget` piped into a shell | ask |
+| `wp-destructive`: `wp db reset/drop/clean/import`, `wp site empty/delete`, `wp search-replace` without `--dry-run` or `--export`; also through `docker`, `ddev`, `lando` or `vendor/bin/wp` | ask |
+| `docker-data-loss`: `docker compose down -v`, `docker volume rm/prune`, `docker system prune --volumes`, `ddev delete`, `lando destroy` | ask |
 | `protected-file`: writing a protected path (see below) | per path |
 | `secret-high`: a known key format | deny |
 | `secret-generic`: `password = "…"`-style assignments | ask |
