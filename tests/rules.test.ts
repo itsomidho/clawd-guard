@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { DEFAULT_CONFIG, checkBash, checkPath, checkSecrets, commitKind, mergeConfig } from '../hooks/rules'
+import { DEFAULT_CONFIG, checkBash, checkPath, checkSecrets, commitKind, displayPath, fitText, mergeConfig, shortenPath } from '../hooks/rules'
 import type { ShellContext } from '../hooks/rules'
 
 const ctx: ShellContext = { root: '/work/app', cwd: '/work/app', home: '/home/u', branch: 'feature/x', isDirty: true }
@@ -153,4 +153,27 @@ test('new rules can be turned off', () => {
   const config = mergeConfig(DEFAULT_CONFIG, { rules: { 'wp-destructive': 'off', 'docker-data-loss': 'deny' } })
   expect(checkBash(config, 'wp db reset --yes', ctx)).toBe(null)
   expect(checkBash(config, 'docker compose down -v', ctx)?.action).toBe('deny')
+})
+
+test('messages name the full path, with ~ for home', () => {
+  expect(checkPath(DEFAULT_CONFIG, '/work/app/config/.env', '/work/app')?.reason.startsWith('/work/app/config/.env ')).toBe(true)
+  expect(checkPath(DEFAULT_CONFIG, '/home/u/site/.env', '/home/u/site', '/home/u')?.reason.startsWith('~/site/.env ')).toBe(true)
+  expect(bash('rm -rf ../other')?.reason).toBe('rm -rf on /work/other, outside the project')
+  expect(bash('rm -rf ~/old/cache')?.reason).toBe('rm -rf on ~/old/cache, outside the project')
+  expect(displayPath('/home/u', '/home/u')).toBe('~')
+  expect(displayPath('/home/user2/x', '/home/u')).toBe('/home/user2/x')
+})
+
+test('long paths are shortened from the middle, keeping the file name', () => {
+  expect(shortenPath('/a/b/c', 20)).toBe('/a/b/c')
+  const long = '~/wp-local-dev/academy/web/app/themes/sage/config/.env.production'
+  const cut = shortenPath(long, 40)
+  expect(cut.length).toBe(40)
+  expect(cut.startsWith('~/wp-local-dev')).toBe(true)
+  expect(cut.endsWith('/config/.env.production')).toBe(true)
+  const line = fitText(`${long} is a protected file (.env.*)`, 60)
+  expect(line.length).toBe(60)
+  expect(line.endsWith('/.env.production is a protected file (.env.*)')).toBe(true)
+  expect(fitText('short text', 60)).toBe('short text')
+  expect(fitText('no path here at all, just a long sentence that goes on', 20)).toBe('no path here at all…')
 })

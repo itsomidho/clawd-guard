@@ -8,6 +8,8 @@ import {
   checkPath,
   checkSecrets,
   commitKind,
+  displayPath,
+  fitText,
   mergeConfig,
   parseConfigFile,
   strictest,
@@ -112,8 +114,9 @@ async function judge($: Engine, tool: string, input: unknown): Promise<Verdict |
   const path = field(input, 'file_path') ?? field(input, 'notebook_path')
   if (path === undefined) return null
   const text = field(input, 'content') ?? field(input, 'new_string') ?? field(input, 'new_source') ?? ''
-  const name = path.slice(path.lastIndexOf('/') + 1)
-  return strictest([checkPath(config, path, root), checkSecrets(config, text, name)])
+  const abs = path.startsWith('/') ? path : `${await $.session.cwd()}/${path}`
+  const home = await homeDir($)
+  return strictest([checkPath(config, abs, root, home), checkSecrets(config, text, displayPath(abs, home))])
 }
 
 async function record($: Engine, v: Verdict): Promise<void> {
@@ -189,7 +192,7 @@ export const register: Register = on => {
     const nDenied = await read($, denied)
     const nAsked = await read($, asked)
     const room = Math.max(20, e.props.bodyColumns - 44)
-    const summary = hit.summary.length > room ? hit.summary.slice(0, room - 1) + '…' : hit.summary
+    const summary = fitText(hit.summary, room)
 
     return (
       <Box>

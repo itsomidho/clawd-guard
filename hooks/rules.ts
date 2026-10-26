@@ -137,6 +137,45 @@ export function isInside(path: string, dir: string): boolean {
   return d === '/' || p === d || p.startsWith(d + '/')
 }
 
+// The full path, with ~ for the home folder.
+export function displayPath(path: string, home: string | undefined): string {
+  const p = normalize(path)
+  if (home === undefined || normalize(home) === '/') return p
+  const h = normalize(home)
+  return p === h ? '~' : p.startsWith(h + '/') ? '~' + p.slice(h.length) : p
+}
+
+// A path cut to `max` characters from the middle, so its start and its file
+// name both stay.
+export function shortenPath(path: string, max: number): string {
+  if (path.length <= max) return path
+  if (max < 2) return '…'
+  const name = path.slice(path.lastIndexOf('/'))
+  // The file's folder too, when that still leaves room for the start.
+  const cut = path.lastIndexOf('/', path.length - name.length - 1)
+  const parent = cut < 0 ? name : path.slice(cut)
+  const keep = parent.length <= max - 7 ? parent : name
+  const tail = Math.min(max - 1, Math.max(keep.length, Math.floor((max - 1) / 2)))
+  return path.slice(0, max - 1 - tail) + '…' + path.slice(path.length - tail)
+}
+
+// A message cut to `room` characters. The longest path in it is shortened
+// from the middle first; only then is the end cut.
+export function fitText(text: string, room: number): string {
+  if (text.length <= room) return text
+  const paths = text.match(/(?:~|\/)[^\s,;()]*\/[^\s,;()]+/g) ?? []
+  const path = paths.reduce((a, b) => (b.length > a.length ? b : a), '')
+  if (path !== '') {
+    const max = path.length - (text.length - room)
+    const name = path.slice(path.lastIndexOf('/'))
+    if (max >= Math.min(name.length + 2, 12)) {
+      const at = text.indexOf(path)
+      return text.slice(0, at) + shortenPath(path, max) + text.slice(at + path.length)
+    }
+  }
+  return text.slice(0, Math.max(0, room - 1)) + '…'
+}
+
 export function globToRegExp(glob: string): RegExp {
   let source = ''
   for (let i = 0; i < glob.length; i++) {
@@ -165,14 +204,13 @@ export function matchesGlob(pattern: string, absPath: string, root: string): boo
   return re.test(rel) || (pattern.startsWith('.git/') && /(^|\/)\.git\//.test(path))
 }
 
-export function checkPath(config: Config, absPath: string, root: string): Verdict | null {
+export function checkPath(config: Config, absPath: string, root: string, home?: string): Verdict | null {
   if (config.allowPaths.some(p => matchesGlob(p, absPath, root))) return null
   const hits = config.protect.filter(r => r.action !== 'off' && matchesGlob(r.pattern, absPath, root))
   if (hits.length === 0) return null
   const rule = hits.find(r => r.action === 'deny') ?? hits[0]
   if (rule === undefined) return null
-  const shown = isInside(absPath, root) ? normalize(absPath).slice(normalize(root).length + 1) : absPath
-  const base = verdict(config, 'protected-file', `${shown} is a protected file (${rule.pattern})`, 'deny')
+  const base = verdict(config, 'protected-file', `${displayPath(absPath, home)} is a protected file (${rule.pattern})`, 'deny')
   if (base === null) return null
   // The path rule's own action, but never looser than turning the rule off.
   return { ...base, action: rule.action === 'deny' && base.action === 'deny' ? 'deny' : 'ask' }
@@ -307,7 +345,7 @@ function checkTreeTargets(config: Config, targets: readonly string[], ctx: Shell
     const abs = normalize(expanded.startsWith('/') ? expanded : ctx.cwd + '/' + expanded)
     if (isInside(abs, ctx.root)) continue
     if (config.rmAllowPaths.some(p => matchesGlob(p, abs, ctx.root))) continue
-    verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${raw}, outside the project`))
+    verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${displayPath(abs, ctx.home)}, outside the project`))
   }
   return strictest(verdicts)
 }
