@@ -177,3 +177,23 @@ test('long paths are shortened from the middle, keeping the file name', () => {
   expect(fitText('short text', 60)).toBe('short text')
   expect(fitText('no path here at all, just a long sentence that goes on', 20)).toBe('no path here at all…')
 })
+
+test('rm -r on a variable set earlier in the same line is judged by its value', () => {
+  // The command from a real session: T is set to a scratch folder in /tmp.
+  expect(bash('cd ~/wp-local-dev; T=/tmp/claude-1000/x/scratchpad/badca; rm -rf $T; mkdir -p $T; CAROOT=$T mkcert -install')).toBe(null)
+  expect(bash('export T=/tmp/y && rm -rf "${T}/sub"')).toBe(null)
+  expect(bash('T=src/gen; rm -rf $T')).toBe(null)
+  expect(bash('T=/etc/nginx; rm -rf $T')?.reason).toBe('rm -rf on /etc/nginx (from $T), outside the project')
+  expect(bash('T=~; rm -rf $T/')?.rule).toBe('rm-rf-root')
+  expect(bash('T=/tmp/a; T=/etc/b; rm -rf $T')?.action).toBe('ask')
+})
+
+test('rm -r on a variable guard cannot read says so', () => {
+  const unknown = "rm -rf on $T: guard can't tell what $T holds, so it may delete anything"
+  expect(bash('rm -rf $T')?.reason).toBe(unknown)
+  expect(bash('T=$(mktemp -d); rm -rf $T')?.reason).toBe(unknown)
+  expect(bash('T=/tmp/a; T=$X; rm -rf $T')?.reason).toBe(unknown)
+  // A prefix assignment lasts only for its own command; $T is expanded before it.
+  expect(bash('T=/tmp/a rm -rf $T')?.reason).toBe(unknown)
+  expect(bash('rm -rf $HOME/old')?.rule).toBe('rm-rf-outside')
+})

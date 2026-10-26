@@ -23,6 +23,9 @@ export type ShellContext = {
   branch: string | undefined
   // Whether the work tree has uncommitted changes; undefined when unknown.
   isDirty: boolean | undefined
+  // Shell variables set earlier in the same command line: the literal value,
+  // or null when it is set to something guard cannot read ($(…), $X…).
+  vars?: ReadonlyMap<string, string | null>
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -289,6 +292,47 @@ function basename(word: string): string {
   return word.slice(word.lastIndexOf('/') + 1)
 }
 
+const DECLARE = new Set(['export', 'readonly', 'local', 'declare', 'typeset'])
+
+// Notes `NAME=value` from a command made only of assignments (also after
+// export and the like). A value with $, ` or a glob is unknown. An assignment
+// in front of another command only lasts for it, so it is not kept, unless
+// its value is unknown: `T=$(mktemp -d)` splits into such words.
+function noteAssignments(words: readonly string[], vars: Map<string, string | null>): void {
+  let i = DECLARE.has(words[0] ?? '') ? 1 : 0
+  while (i > 0 && i < words.length && (words[i] ?? '').startsWith('-')) i++
+  const found: [string, string][] = []
+  for (; i < words.length; i++) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s.exec(words[i] ?? '')
+    if (m === null) break
+    found.push([m[1] ?? '', m[2] ?? ''])
+  }
+  const isOnly = i === words.length
+  for (const [name, value] of found) {
+    const isLiteral = !/[$`*?]/.test(value)
+    if (isOnly) vars.set(name, isLiteral ? value : null)
+    else if (!isLiteral) vars.set(name, null)
+  }
+}
+
+// A word with the variables set earlier in the line put in. $HOME is left
+// for expandHome. `unknown` names the variables whose value is not known.
+export function resolveVars(word: string, vars: ReadonlyMap<string, string | null> | undefined): { text: string; used: string[]; unknown: string[] } {
+  const used: string[] = []
+  const unknown: string[] = []
+  const text = word.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, a?: string, b?: string) => {
+    const name = a ?? b ?? ''
+    const value = vars?.get(name)
+    if (typeof value === 'string') {
+      used.push(name)
+      return value
+    }
+    if (name !== 'HOME' || value === null) unknown.push(name)
+    return whole
+  })
+  return { text, used, unknown }
+}
+
 function expandHome(word: string, home: string | undefined): string {
   if (home === undefined) return word
   if (word === '~' || word === '$HOME' || word === '${HOME}') return home
@@ -329,23 +373,26 @@ function checkRm(config: Config, args: string[], ctx: ShellContext): Verdict | n
 function checkTreeTargets(config: Config, targets: readonly string[], ctx: ShellContext, what: string): Verdict | null {
   const verdicts: (Verdict | null)[] = []
   for (const raw of targets) {
-    const expanded = expandHome(raw, ctx.home)
+    const { text: word, used, unknown } = resolveVars(raw, ctx.vars)
+    const from = used.length > 0 ? ` (from ${raw})` : ''
+    const expanded = expandHome(word, ctx.home)
     const isRootish =
-      /^(\/|\/\*|~|~\/|~\/\*|\$HOME\/?\*?|\$\{HOME\}\/?\*?)$/.test(raw) ||
+      /^(\/|\/\*|~|~\/|~\/\*|\$HOME\/?\*?|\$\{HOME\}\/?\*?)$/.test(word) ||
       (ctx.home !== undefined && normalize(expanded.replace(/\/\*$/, '')) === normalize(ctx.home)) ||
       (expanded.startsWith('/') && normalize(expanded.replace(/\/\*$/, '')) === normalize(ctx.root))
     if (isRootish) {
-      verdicts.push(verdict(config, 'rm-rf-root', `${what} on ${raw} would delete a whole tree (/, home or the project)`, 'deny'))
+      verdicts.push(verdict(config, 'rm-rf-root', `${what} on ${word}${from} would delete a whole tree (/, home or the project)`, 'deny'))
       continue
     }
-    if (raw.includes('$') && !raw.startsWith('$HOME') && !raw.startsWith('${HOME}')) {
-      verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${raw}: a variable that may expand anywhere`))
+    if (unknown.length > 0 || (word.includes('$') && !word.startsWith('$HOME') && !word.startsWith('${HOME}'))) {
+      const names = unknown.length > 0 ? unknown.map(n => `$${n}`).join(', ') : 'it'
+      verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${raw}: guard can't tell what ${names} holds, so it may delete anything`))
       continue
     }
     const abs = normalize(expanded.startsWith('/') ? expanded : ctx.cwd + '/' + expanded)
     if (isInside(abs, ctx.root)) continue
     if (config.rmAllowPaths.some(p => matchesGlob(p, abs, ctx.root))) continue
-    verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${displayPath(abs, ctx.home)}, outside the project`))
+    verdicts.push(verdict(config, 'rm-rf-outside', `${what} on ${displayPath(abs, ctx.home)}${from}, outside the project`))
   }
   return strictest(verdicts)
 }
@@ -516,19 +563,22 @@ function substitutions(line: string): string[] {
 const SQL_DESTRUCTIVE = /\b(DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW)|TRUNCATE(\s+TABLE)?\s+\w|DELETE\s+FROM\s+[\w."`]+\s*(;|$|["'`]))/i
 const DROP_COMMANDS = new Set(['dropdb', 'dropuser'])
 
-export function checkBash(config: Config, line: string, ctx: ShellContext, depth = 0): Verdict | null {
+export function checkBash(config: Config, line: string, outer: ShellContext, depth = 0): Verdict | null {
   const verdicts: (Verdict | null)[] = []
+  const vars = new Map(outer.vars ?? [])
+  const ctx: ShellContext = { ...outer, vars }
   const inner = (script: string) => {
     if (depth >= MAX_DEPTH) return verdict(config, 'rm-rf-outside', 'commands nested too deep to check')
-    return checkBash(config, script, ctx, depth + 1)
+    return checkBash(config, script, { ...ctx, vars: new Map(vars) }, depth + 1)
   }
   for (const sub of substitutions(line)) verdicts.push(inner(sub))
   const commands = splitCommands(line)
   for (let n = 0; n < commands.length; n++) {
     const raw = commands[n] ?? []
     const isPiped = raw[raw.length - 1] === '\u0000|'
+    noteAssignments(isPiped ? raw.slice(0, -1) : raw, vars)
     const words = stripWrappers(isPiped ? raw.slice(0, -1) : raw)
-    if (words.length === 0) continue
+    if (words.length === 0 || DECLARE.has(words[0] ?? '')) continue
     const name = basename(words[0] ?? '')
     const args = words.slice(1)
     const wp = wpArgs(name, words)

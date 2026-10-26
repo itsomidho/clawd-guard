@@ -57,7 +57,7 @@ test('the band counts blocks, shows the last one and hides on Dismiss', async ($
     const ui = await $.ui.mount({ plugin: 'clawd-guard', surface, component: 'AbovePrompt', // Only the props the band reads; the rest are the engine's.
       props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } as never })
     expect(await ui.find({ type: 'Text', text: /rm -rf? on \// })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: String(blocks) })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: new RegExp(` · ${blocks} blocked, 0 asked this session$`) })).toBeDefined()
     // Framed like clawd-statusbar and clawd-logs: a round, dim border.
     const drawn = JSON.stringify(await ui.drawn())
     expect(drawn).toContain('"borderStyle":"round"')
@@ -79,4 +79,17 @@ test('the band shows a protected file by its full path, without the pattern', as
   }
   const status = await $.command.run({ command: 'guard', args: '' } as never)
   expect(String((status as { text?: string }).text).includes('is a protected file (.env.*)')).toBe(true)
+})
+
+test('the band says what happened, what set it off, the rule and the counts', async ($, on) => {
+  world(on)
+  await $.tool.check({ tool: 'Bash', input: { command: 'cd /x;\n  rm -rf $T' } })
+  const ui = await $.ui.mount({ plugin: 'clawd-guard', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } as never })
+  expect(await ui.find({ type: 'Text', text: 'Asked you: ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /guard can't tell what \$T holds/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '$ cd /x; rm -rf $T · rm-rf-outside · 0 blocked, 1 asked this session' })).toBeDefined()
+  await $.tool.check({ tool: 'Write', input: { file_path: '/home/u/app/.env', content: 'A=1' } })
+  expect(await ui.find({ type: 'Text', text: 'Blocked: ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Write ~/app/.env · protected-file · 1 blocked, 1 asked this session' })).toBeDefined()
 })

@@ -119,8 +119,17 @@ async function judge($: Engine, tool: string, input: unknown): Promise<Verdict |
   return strictest([checkPath(config, abs, root, home), checkSecrets(config, text, displayPath(abs, home))])
 }
 
-async function record($: Engine, v: Verdict): Promise<void> {
-  const hit: GuardHit = { action: v.action, rule: v.rule, summary: v.reason, at: await $.clock.now() }
+// What set a check off, for the band: the command on one line, or the tool
+// and the file's full path.
+async function describe($: Engine, tool: string, input: unknown): Promise<string> {
+  if (tool === 'Bash') return '$ ' + (field(input, 'command') ?? '').replace(/\s+/g, ' ').trim()
+  const path = field(input, 'file_path') ?? field(input, 'notebook_path') ?? ''
+  const abs = path.startsWith('/') ? path : `${await $.session.cwd()}/${path}`
+  return `${tool} ${displayPath(abs, await homeDir($))}`
+}
+
+async function record($: Engine, v: Verdict, detail: string): Promise<void> {
+  const hit: GuardHit = { action: v.action, rule: v.rule, summary: v.reason, at: await $.clock.now(), detail }
   if (v.action === 'deny') await update($, denied, n => n + 1)
   else await update($, asked, n => n + 1)
   await update($, last, () => hit)
@@ -144,14 +153,15 @@ export const register: Register = on => {
     if (v === null) return next(e)
 
     const reason = `${PLUGIN}: ${v.reason} [${v.rule}]`
+    const detail = await describe($, e.tool, e.input)
     if (v.action === 'deny') {
-      await record($, v)
+      await record($, v, detail)
       return { decision: 'deny', reason } satisfies ToolCheckResult
     }
     // An ask never loosens what the rules beneath already refuse.
     const beneath = await next(e)
     if (beneath.decision === 'deny') return beneath
-    await record($, v)
+    await record($, v, detail)
     return { decision: 'ask', reason } satisfies ToolCheckResult
   }).catch(() => ({ decision: 'deny', reason: `${PLUGIN}: its check failed, so the call was refused; /guard off pauses it` }))
 
@@ -191,24 +201,27 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const nDenied = await read($, denied)
     const nAsked = await read($, asked)
-    // What the line needs besides the summary: the frame's border and padding
-    // (4), "🛡 " and the counts with their labels, and 10 for Dismiss.
-    const fixed = 4 + 3 + String(nDenied).length + ' blocked · '.length + String(nAsked).length + ' asked · '.length + 1 + 10
-    const room = Math.max(20, e.props.bodyColumns - fixed)
+    const isDeny = hit.action === 'deny'
+    const label = isDeny ? 'Blocked: ' : 'Asked you: '
+    // Each row's room: the frame's border and padding take 4; the first row
+    // also has "🛡 ", the label and Dismiss (12 with its brackets).
+    const room = Math.max(20, e.props.bodyColumns - (4 + 3 + label.length + 1 + 12))
     // The band leaves out a protected file's pattern, so the path gets the
     // room; /guard still shows it.
     const text = hit.rule === 'protected-file' ? hit.summary.replace(/ \([^()]*\)$/, '') : hit.summary
     const summary = fitText(text, room)
+    const tail = ` · ${hit.rule} · ${nDenied} blocked, ${nAsked} asked this session`
+    const detail = hit.detail === undefined ? '' : fitText(hit.detail, Math.max(10, e.props.bodyColumns - 4 - tail.length))
 
     return (
-      <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="row">
-        <Text color={hit.action === 'deny' ? 'red' : 'yellow'}>🛡 </Text>
-        <Text bold>{nDenied}</Text>
-        <Text dimColor> blocked · </Text>
-        <Text bold>{nAsked}</Text>
-        <Text dimColor> asked · </Text>
-        <Text>{summary} </Text>
-        <Button key="dismiss" label="Dismiss" onPress={() => update($, isBandHidden, () => true)} />
+      <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+        <Box flexDirection="row">
+          <Text color={isDeny ? 'red' : 'yellow'}>🛡 </Text>
+          <Text bold color={isDeny ? 'red' : 'yellow'}>{label}</Text>
+          <Text>{summary} </Text>
+          <Button key="dismiss" label="Dismiss" onPress={() => update($, isBandHidden, () => true)} />
+        </Box>
+        <Text dimColor>{detail === '' ? tail.slice(3) : detail + tail}</Text>
       </Box>
     )
   })
