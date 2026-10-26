@@ -119,13 +119,10 @@ async function judge($: Engine, tool: string, input: unknown): Promise<Verdict |
   return strictest([checkPath(config, abs, root, home), checkSecrets(config, text, displayPath(abs, home))])
 }
 
-// What set a check off, for the band: the command on one line, or the tool
-// and the file's full path.
-async function describe($: Engine, tool: string, input: unknown): Promise<string> {
-  if (tool === 'Bash') return '$ ' + (field(input, 'command') ?? '').replace(/\s+/g, ' ').trim()
-  const path = field(input, 'file_path') ?? field(input, 'notebook_path') ?? ''
-  const abs = path.startsWith('/') ? path : `${await $.session.cwd()}/${path}`
-  return `${tool} ${displayPath(abs, await homeDir($))}`
+// What set a check off, for the band: the command on one line, or the
+// tool's name (the file is already in the reason).
+function describe(tool: string, input: unknown): string {
+  return tool === 'Bash' ? '$ ' + (field(input, 'command') ?? '').replace(/\s+/g, ' ').trim() : tool
 }
 
 async function record($: Engine, v: Verdict, detail: string): Promise<void> {
@@ -153,7 +150,7 @@ export const register: Register = on => {
     if (v === null) return next(e)
 
     const reason = `${PLUGIN}: ${v.reason} [${v.rule}]`
-    const detail = await describe($, e.tool, e.input)
+    const detail = describe(e.tool, e.input)
     if (v.action === 'deny') {
       await record($, v, detail)
       return { decision: 'deny', reason } satisfies ToolCheckResult

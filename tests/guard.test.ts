@@ -91,5 +91,5 @@ test('the band says what happened, what set it off, the rule and the counts', as
   expect(await ui.find({ type: 'Text', text: '$ cd /x; rm -rf $T · rm-rf-outside · 0 blocked, 1 asked this session' })).toBeDefined()
   await $.tool.check({ tool: 'Write', input: { file_path: '/home/u/app/.env', content: 'A=1' } })
   expect(await ui.find({ type: 'Text', text: 'Blocked: ' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'Write ~/app/.env · protected-file · 1 blocked, 1 asked this session' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Write · protected-file · 1 blocked, 1 asked this session' })).toBeDefined()
 })
