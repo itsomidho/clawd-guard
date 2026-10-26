@@ -192,7 +192,10 @@ export const register: Register = on => {
     const nDenied = await read($, denied)
     const nAsked = await read($, asked)
     const room = Math.max(20, e.props.bodyColumns - 44)
-    const summary = fitText(hit.summary, room)
+    // The band leaves out a protected file's pattern, so the path gets the
+    // room; /guard still shows it.
+    const text = hit.rule === 'protected-file' ? hit.summary.replace(/ \([^()]*\)$/, '') : hit.summary
+    const summary = fitText(text, room)
 
     return (
       <Box>

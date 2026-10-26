@@ -151,10 +151,10 @@ export function shortenPath(path: string, max: number): string {
   if (path.length <= max) return path
   if (max < 2) return '…'
   const name = path.slice(path.lastIndexOf('/'))
-  // The file's folder too, when that still leaves room for the start.
+  // The file's folder too when it fits: it says more than the path's start.
   const cut = path.lastIndexOf('/', path.length - name.length - 1)
   const parent = cut < 0 ? name : path.slice(cut)
-  const keep = parent.length <= max - 7 ? parent : name
+  const keep = parent.length <= max - 2 ? parent : name
   const tail = Math.min(max - 1, Math.max(keep.length, Math.floor((max - 1) / 2)))
   return path.slice(0, max - 1 - tail) + '…' + path.slice(path.length - tail)
 }
