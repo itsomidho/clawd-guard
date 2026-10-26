@@ -58,6 +58,10 @@ test('the band counts blocks, shows the last one and hides on Dismiss', async ($
       props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } as never })
     expect(await ui.find({ type: 'Text', text: /rm -rf? on \// })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: String(blocks) })).toBeDefined()
+    // Framed like clawd-statusbar and clawd-logs: a round, dim border.
+    const drawn = JSON.stringify(await ui.drawn())
+    expect(drawn).toContain('"borderStyle":"round"')
+    expect(drawn).toContain('"borderDimColor":true')
     await ui.press({ key: 'dismiss' })
     expect(await ui.find({ key: 'dismiss' })).toBeUndefined()
   }
@@ -66,7 +70,7 @@ test('the band counts blocks, shows the last one and hides on Dismiss', async ($
 test('the band shows a protected file by its full path, without the pattern', async ($, on) => {
   world(on)
   await $.tool.check({ tool: 'Write', input: { file_path: '/home/u/sites/app/web/app/themes/sage/config/.env.production', content: 'A=1' } })
-  for (const [cols, want] of [[160, '~/sites/app/web/app/themes/sage/config/.env.production is a protected file'], [90, '…/config/.env.production is a protected file']] as const) {
+  for (const [cols, want] of [[160, '~/sites/app/web/app/themes/sage/config/.env.production is a protected file'], [90, '/config/.env.production is a protected file']] as const) {
     const ui = await $.ui.mount({ plugin: 'clawd-guard', surface: 'terminal', component: 'AbovePrompt',
       props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: cols } as never })
     const text = (await ui.find({ type: 'Text', text: /protected file/ }))?.text ?? ''

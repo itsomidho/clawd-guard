@@ -10,7 +10,7 @@ A safety net for [Claude Code](https://claude.com/claude-code). Before Claude ru
 - **Hidden commands:** what runs inside `bash -c "…"`, `eval`, `$(…)`, backticks and `xargs` is checked too, and `find -delete` counts as `rm -r` on the paths it searches.
 - **Files:** `.env*`, private keys, `.netrc` and `.git/` are never written. Lockfiles ask first.
 - **Secrets:** what Claude writes and what it commits (the staged diff) is scanned for AWS, GitHub, GitLab, Anthropic, OpenAI, Slack, Stripe, Google and npm keys, private keys and hard-coded passwords. The secret itself is never echoed back.
-- **Feedback:** a toast when something is stopped, plus a band above the prompt with the session's counters and the last block. Paths are shown in full (`~` for your home folder); when the line is too long, the middle of the path is cut so its file name stays.
+- **Feedback:** a toast when something is stopped, plus a band above the prompt, framed like [clawd-statusbar](https://github.com/itsomidho/clawd-statusbar)'s section, with the session's counters and the last block. Paths are shown in full (`~` for your home folder); when the line is too long, the middle of the path is cut so its file name stays.
 
 It also covers subagents' calls.
 

@@ -191,14 +191,17 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const nDenied = await read($, denied)
     const nAsked = await read($, asked)
-    const room = Math.max(20, e.props.bodyColumns - 44)
+    // What the line needs besides the summary: the frame's border and padding
+    // (4), "🛡 " and the counts with their labels, and 10 for Dismiss.
+    const fixed = 4 + 3 + String(nDenied).length + ' blocked · '.length + String(nAsked).length + ' asked · '.length + 1 + 10
+    const room = Math.max(20, e.props.bodyColumns - fixed)
     // The band leaves out a protected file's pattern, so the path gets the
     // room; /guard still shows it.
     const text = hit.rule === 'protected-file' ? hit.summary.replace(/ \([^()]*\)$/, '') : hit.summary
     const summary = fitText(text, room)
 
     return (
-      <Box>
+      <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="row">
         <Text color={hit.action === 'deny' ? 'red' : 'yellow'}>🛡 </Text>
         <Text bold>{nDenied}</Text>
         <Text dimColor> blocked · </Text>
