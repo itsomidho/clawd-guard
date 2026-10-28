@@ -61,7 +61,7 @@ test('the band counts blocks, shows the last one and hides on Dismiss', async ($
     // Framed like clawd-statusbar and clawd-logs: a round, dim border.
     const drawn = JSON.stringify(await ui.drawn())
     expect(drawn).toContain('"borderStyle":"round"')
-    expect(drawn).toContain('"borderDimColor":true')
+    expect(drawn).toContain('"borderColor":"#5c6370"')
     await ui.press({ key: 'dismiss' })
     expect(await ui.find({ key: 'dismiss' })).toBeUndefined()
   }
@@ -86,10 +86,10 @@ test('the band says what happened, what set it off, the rule and the counts', as
   await $.tool.check({ tool: 'Bash', input: { command: 'cd /x;\n  rm -rf $T' } })
   const ui = await $.ui.mount({ plugin: 'clawd-guard', surface: 'terminal', component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } as never })
-  expect(await ui.find({ type: 'Text', text: 'Asked you: ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' ASKED YOU ' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /guard can't tell what \$T holds/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '$ cd /x; rm -rf $T · rm-rf-outside · 0 blocked, 1 asked this session' })).toBeDefined()
   await $.tool.check({ tool: 'Write', input: { file_path: '/home/u/app/.env', content: 'A=1' } })
-  expect(await ui.find({ type: 'Text', text: 'Blocked: ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' BLOCKED ' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Write · protected-file · 1 blocked, 1 asked this session' })).toBeDefined()
 })

@@ -199,10 +199,11 @@ export const register: Register = on => {
     const nDenied = await read($, denied)
     const nAsked = await read($, asked)
     const isDeny = hit.action === 'deny'
-    const label = isDeny ? 'Blocked: ' : 'Asked you: '
+    // The verdict as a chip: a space each side, then a space before the summary.
+    const label = isDeny ? ' BLOCKED ' : ' ASKED YOU '
     // Each row's room: the frame's border and padding take 4; the first row
-    // also has "🛡 ", the label and Dismiss (12 with its brackets).
-    const room = Math.max(20, e.props.bodyColumns - (4 + 3 + label.length + 1 + 12))
+    // also has the chip and its space, and Dismiss (12 with its brackets).
+    const room = Math.max(20, e.props.bodyColumns - (4 + label.length + 1 + 1 + 12))
     // The band leaves out a protected file's pattern, so the path gets the
     // room; /guard still shows it.
     const text = hit.rule === 'protected-file' ? hit.summary.replace(/ \([^()]*\)$/, '') : hit.summary
@@ -211,11 +212,10 @@ export const register: Register = on => {
     const detail = hit.detail === undefined ? '' : fitText(hit.detail, Math.max(10, e.props.bodyColumns - 4 - tail.length))
 
     return (
-      <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
+      <Box borderStyle="round" borderColor={BORDER} paddingX={1} flexDirection="column">
         <Box flexDirection="row">
-          <Text color={isDeny ? 'red' : 'yellow'}>🛡 </Text>
-          <Text bold color={isDeny ? 'red' : 'yellow'}>{label}</Text>
-          <Text>{summary} </Text>
+          <Text bold color={CHIP_TEXT} backgroundColor={isDeny ? ERR : WARN}>{label}</Text>
+          <Text> {summary} </Text>
           <Button key="dismiss" label="Dismiss" onPress={() => update($, isBandHidden, () => true)} />
         </Box>
         <Text dimColor>{detail === '' ? tail.slice(3) : detail + tail}</Text>
@@ -223,3 +223,11 @@ export const register: Register = on => {
     )
   })
 }
+
+// The clawd family's look (shared with clawd-git and clawd-debug): the accent,
+// the frame colour, and chips (dark text on a colour).
+const BORDER = '#5c6370'
+const CHIP_TEXT = '#1e2127'
+const WARN = '#e5c07b'
+const ERR = '#e06c75'
+
