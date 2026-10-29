@@ -197,3 +197,24 @@ test('rm -r on a variable guard cannot read says so', () => {
   expect(bash('T=/tmp/a rm -rf $T')?.reason).toBe(unknown)
   expect(bash('rm -rf $HOME/old')?.rule).toBe('rm-rf-outside')
 })
+
+test('shell writes to protected files are judged as the Write tool is', () => {
+  // Redirections, attached or not, appending or not, any stream.
+  for (const cmd of ['echo DEBUG=1 > .env', 'echo DEBUG=1 >.env', 'printf x>.env', 'cat >> .env.local <<EOF', 'some-cmd 2> ~/.netrc', 'echo x &> .git/config']) {
+    expect(bash(cmd)?.rule).toBe('protected-file')
+    expect(bash(cmd)?.action).toBe('deny')
+  }
+  // Commands that write files.
+  for (const cmd of ['echo x | tee .env', 'tee -a .env < x', 'cp .env.example .env', 'mv tmp.txt .env', 'cp backup/.env .', 'cp a.txt b.txt -t .git', 'touch .env', 'truncate -s 0 .env', 'dd if=/dev/zero of=.env', "sed -i 's/a/b/' .env", "sed -e 's/a/b/' -i .env", "perl -pi -e 's/a/b/' .env"]) {
+    expect(bash(cmd)?.rule).toBe('protected-file')
+  }
+  // A lockfile asks, as it does for the Write tool.
+  expect(bash('npm view x > package-lock.json')?.action).toBe('ask')
+  // Reading, other files, other streams, and text with > in it pass.
+  for (const cmd of ['cat .env', 'grep KEY .env', 'echo hi > notes.txt', 'cmd 2>&1 | tail', 'cmd > /dev/null 2>&1', 'echo "a > .env"', 'cp .env /tmp/env-copy', "sed 's/a/b/' .env > out.txt", 'node -e "x=>1"']) {
+    expect(bash(cmd)).toBe(null)
+  }
+  // A config's allowPaths lifts it here too.
+  const allowed = mergeConfig(DEFAULT_CONFIG, { allowPaths: ['.env.testing'] })
+  expect(checkBash(allowed, 'echo X=1 > .env.testing', ctx)).toBe(null)
+})

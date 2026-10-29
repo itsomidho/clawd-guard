@@ -1,8 +1,11 @@
 {
   "name": "clawd-guard",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "A safety net: stops risky shell commands, writes to secret files and leaked keys before they run",
   "author": { "name": "Omid Hosseini", "url": "https://github.com/itsomidho" },
+  "homepage": "https://github.com/itsomidho/clawd-guard",
+  "repository": "https://github.com/itsomidho/clawd-guard",
   "license": "MIT",
+  "keywords": ["safety", "guardrails", "secrets", "git", "shell"],
   "types": "./types/index.d.ts"
 }

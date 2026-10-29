@@ -10,7 +10,7 @@ A safety net for [Claude Code](https://claude.com/claude-code). Before Claude ru
 
 - **Shell:** `rm -rf` on `/`, home, the project or anything outside it · force-push to `main`/`master` · deleting a protected branch · `git reset --hard`, `git clean -f` or `git checkout -- .` while you have uncommitted changes · `DROP`, `TRUNCATE` and `DELETE` without `WHERE` · `chmod 777` · `curl … | sh` · `wp db reset`, `wp search-replace` without `--dry-run` · `docker compose down -v` and other volume deletes
 - **Hidden commands:** what runs inside `bash -c "…"`, `eval`, `$(…)`, backticks and `xargs` is checked too, and `find -delete` counts as `rm -r` on the paths it searches.
-- **Files:** `.env*`, private keys, `.netrc` and `.git/` are never written. Lockfiles ask first.
+- **Files:** `.env*`, private keys, `.netrc` and `.git/` are never written, by Claude's file tools or by a shell command (`> .env`, `>>`, `tee`, `cp`, `mv`, `touch`, `sed -i` and the like). Lockfiles ask first.
 - **Secrets:** what Claude writes and what it commits (the staged diff) is scanned for AWS, GitHub, GitLab, Anthropic, OpenAI, Slack, Stripe, Google and npm keys, private keys and hard-coded passwords. The secret itself is never echoed back.
 - **Feedback:** a toast when something is stopped, plus a band above the prompt, framed like [clawd-statusbar](https://github.com/itsomidho/clawd-statusbar)'s section, with the last catch: a `BLOCKED` or `ASKED YOU` chip, why, what set it off (the command, or the tool), the rule, and the session's counts. Paths are shown in full (`~` for your home folder); when the line is too long, the middle of the path is cut so its file name stays.
 
@@ -83,7 +83,7 @@ Settings are read on every check, so an edit applies at once. Files are read in 
 
 - **"Ask" goes to whoever approves in your permission mode.** That's the dialog in default mode. In auto mode it's the classifier, so set a rule to `deny` if it must never run unattended.
 - **clawd-guard only tightens.** It never allows a call that your settings or permission rules refuse.
-- **It reads commands, it doesn't run a shell.** It splits the line at `;`, `&&`, `||` and `|`, and looks through `sudo` and `env`. A command hidden behind `eval`, a script file or an alias goes past it. Treat it as a seatbelt, not a sandbox.
+- **It reads commands, it doesn't run a shell.** It splits the line at `;`, `&&`, `||` and `|`, and looks through `sudo` and `env`, `bash -c`, `eval` and `$(…)`. A script file, an alias, or a program that writes files itself (`python -c …`, a build tool) goes past it. Treat it as a seatbelt, not a sandbox.
 - **If the guard itself fails,** the call is refused with a message saying so, and `/guard off` gets you going again.
 - **Other plugins can read its counters:** clawd-statusbar or any other plugin can read `clawd-guard.denied`, `clawd-guard.asked` and `clawd-guard.last` from `$.state`.
 

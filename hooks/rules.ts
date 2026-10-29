@@ -560,6 +560,81 @@ function substitutions(line: string): string[] {
   return found
 }
 
+// ---------- shell writes to protected files ----------
+
+// A redirection word: `>`, `>>`, `2>`, `&>`, `1>>`, with its target attached
+// (`>.env`) or not (then the next word is the target). `2>&1` is no file.
+const REDIRECT = /^(\d*|&)>>?(.*)$/
+
+// The files a command line's redirections write: [targets, the words left].
+function redirects(words: readonly string[]): { targets: string[]; rest: string[] } {
+  const targets: string[] = []
+  const rest: string[] = []
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i] ?? ''
+    // A quoted word with spaces in it is text, not a redirection.
+    const m = /\s/.test(word) ? null : REDIRECT.exec(word)
+    if (m === null) {
+      // A redirection written against the word before it: `echo x>.env`.
+      const at = /\s/.test(word) ? -1 : word.search(/(\d*|&)>>?/)
+      if (at > 0 && !word.slice(0, at).includes('=')) {
+        const tail = REDIRECT.exec(word.slice(at))
+        if (tail && tail[2] !== '' && !tail[2]!.startsWith('&')) targets.push(tail[2]!)
+        rest.push(word.slice(0, at))
+        continue
+      }
+      rest.push(word)
+      continue
+    }
+    const target = m[2] !== '' ? m[2]! : words[++i] ?? ''
+    if (target !== '' && !target.startsWith('&')) targets.push(target)
+  }
+  return { targets, rest }
+}
+
+// The files a command writes, by what it is: tee's files, cp/mv/install/ln's
+// destination (and the file it lands as in a folder), touch, truncate, dd of=,
+// and the files sed -i and perl -i edit in place.
+function writeTargets(name: string, args: readonly string[]): string[] {
+  const plain = args.filter(a => !a.startsWith('-'))
+  if (name === 'tee' || name === 'touch') return plain
+  if (name === 'truncate') return args.filter((a, i) => !a.startsWith('-') && args[i - 1] !== '-s' && args[i - 1] !== '--size')
+  if (name === 'dd') return args.filter(a => a.startsWith('of=')).map(a => a.slice(3))
+  if (name === 'cp' || name === 'mv' || name === 'install' || name === 'ln') {
+    const into = args.findIndex(a => a === '-t' || a === '--target-directory')
+    const dir = into >= 0 ? args[into + 1] : args.find(a => a.startsWith('--target-directory='))?.split('=')[1]
+    const sources = dir !== undefined ? plain.filter(a => a !== dir) : plain.slice(0, -1)
+    const dest = dir ?? plain[plain.length - 1]
+    if (dest === undefined || sources.length === 0) return []
+    // Into a folder only where the line says so (-t, a trailing /, `.`, or
+    // several sources): then each source lands under its own name there.
+    const isFolder = dir !== undefined || dest.endsWith('/') || dest === '.' || dest === '..' || sources.length > 1
+    return isFolder ? [dest, ...sources.map(s => `${dest.replace(/\/+$/, '')}/${s.split('/').pop() ?? s}`)] : [dest]
+  }
+  if (name === 'sed' && args.some(a => a === '-i' || a.startsWith('-i') || a.startsWith('--in-place'))) {
+    const hasScript = args.some(a => a === '-e' || a === '-f' || a === '--expression' || a === '--file')
+    const files = args.filter((a, i) => !a.startsWith('-') && !['-e', '-f', '--expression', '--file'].includes(args[i - 1] ?? ''))
+    return hasScript ? files : files.slice(1)
+  }
+  if (name === 'perl' && args.some(a => /^-\w*i/.test(a))) {
+    return args.filter((a, i) => !a.startsWith('-') && !/^-\w*e$/.test(args[i - 1] ?? ''))
+  }
+  return []
+}
+
+// Each file a shell command writes, checked as the Write tool's path is.
+function checkWrites(config: Config, targets: readonly string[], ctx: ShellContext): Verdict | null {
+  const verdicts: (Verdict | null)[] = []
+  for (const raw of targets) {
+    const { text, unknown } = resolveVars(raw, ctx.vars)
+    if (unknown.length > 0 || text === '' || text.startsWith('/dev/')) continue
+    const expanded = expandHome(text, ctx.home)
+    const abs = normalize(expanded.startsWith('/') ? expanded : ctx.cwd + '/' + expanded)
+    verdicts.push(checkPath(config, abs, ctx.root, ctx.home))
+  }
+  return strictest(verdicts)
+}
+
 const SQL_DESTRUCTIVE = /\b(DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW)|TRUNCATE(\s+TABLE)?\s+\w|DELETE\s+FROM\s+[\w."`]+\s*(;|$|["'`]))/i
 const DROP_COMMANDS = new Set(['dropdb', 'dropuser'])
 
@@ -577,10 +652,14 @@ export function checkBash(config: Config, line: string, outer: ShellContext, dep
     const raw = commands[n] ?? []
     const isPiped = raw[raw.length - 1] === '\u0000|'
     noteAssignments(isPiped ? raw.slice(0, -1) : raw, vars)
-    const words = stripWrappers(isPiped ? raw.slice(0, -1) : raw)
+    // Redirections first: `> .env` writes a protected file whatever the command.
+    const { targets: written, rest } = redirects(stripWrappers(isPiped ? raw.slice(0, -1) : raw))
+    verdicts.push(checkWrites(config, written, ctx))
+    const words = rest
     if (words.length === 0 || DECLARE.has(words[0] ?? '')) continue
     const name = basename(words[0] ?? '')
     const args = words.slice(1)
+    verdicts.push(checkWrites(config, writeTargets(name, args), ctx))
     const wp = wpArgs(name, words)
     if (wp !== null) verdicts.push(checkWp(config, wp))
     if (name === 'rm') verdicts.push(checkRm(config, args, ctx))

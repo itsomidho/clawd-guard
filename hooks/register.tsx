@@ -97,7 +97,7 @@ function field(input: unknown, key: string): string | undefined {
 async function judge($: Engine, tool: string, input: unknown): Promise<Verdict | null> {
   const root = await $.session.root()
   const { config, errors } = await loadConfig($, root)
-  if (errors.length > 0) $.ui.toast(`🛡 ${PLUGIN}: config not read, defaults used: ${errors[0]}`)
+  if (errors.length > 0) $.ui.toast(`${PLUGIN}: config not read, defaults used: ${errors[0]}`)
 
   if (tool === 'Bash') {
     const command = field(input, 'command') ?? ''
@@ -131,7 +131,7 @@ async function record($: Engine, v: Verdict, detail: string): Promise<void> {
   else await update($, asked, n => n + 1)
   await update($, last, () => hit)
   await update($, isBandHidden, () => false)
-  $.ui.toast(`🛡 ${v.action === 'deny' ? 'Blocked' : 'Needs approval'}: ${v.reason}`)
+  $.ui.toast(`${PLUGIN} ${v.action === 'deny' ? 'BLOCKED' : 'ASKED YOU'} · ${v.reason}`)
 }
 
 export const register: Register = on => {
@@ -166,20 +166,20 @@ export const register: Register = on => {
     const arg = e.args.trim()
     if (arg === 'off' || arg === 'on') {
       await update($, isPaused, () => arg === 'off')
-      return { text: arg === 'off' ? '🛡 clawd-guard paused for this session.' : '🛡 clawd-guard is on.' }
+      return { text: arg === 'off' ? 'clawd-guard is paused for this session.' : 'clawd-guard is on.' }
     }
     if (arg === 'reset') {
       await update($, denied, () => 0)
       await update($, asked, () => 0)
       await update($, last, () => null)
-      return { text: '🛡 clawd-guard counters reset.' }
+      return { text: 'clawd-guard counters reset.' }
     }
     const root = await $.session.root()
     const { config, sources, errors } = await loadConfig($, root)
     const rules = Object.entries(config.rules).map(([k, v]) => `  ${k.padEnd(28)} ${v}`)
     const lastHit = await read($, last)
     const lines = [
-      `🛡 clawd-guard ${(await read($, isPaused)) ? 'is PAUSED (/guard on to resume)' : 'is on'}`,
+      `clawd-guard ${(await read($, isPaused)) ? 'is PAUSED (/guard on to resume)' : 'is on'}`,
       `Blocked ${await read($, denied)}, asked ${await read($, asked)} this session.`,
       ...(lastHit === null ? [] : [`Last: ${lastHit.action} — ${lastHit.summary}`]),
       `Config: ${sources.length > 0 ? sources.join(', ') : `defaults (add ~/.claude/${CONFIG_NAME} or .claude/${CONFIG_NAME})`}`,
