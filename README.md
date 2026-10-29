@@ -1,10 +1,12 @@
 # clawd-guard
 
-[![Latest release](https://img.shields.io/github/v/release/itsomidho/clawd-guard?label=release&color=7fbeb3)](https://github.com/itsomidho/clawd-guard/releases)
+[![Latest release](https://img.shields.io/github/v/release/itsomidho/clawd-guard?label=release&color=7fbeb3)](https://github.com/itsomidho/clawd-guard/releases) [![Wiki](https://img.shields.io/badge/docs-wiki-7fbeb3)](https://github.com/itsomidho/clawd-guard/wiki)
 
 A safety net for [Claude Code](https://claude.com/claude-code). Before Claude runs a shell command or writes a file, clawd-guard checks it. A risky call is either **blocked** or **put to you for approval**, with a one-line reason.
 
-![clawd-guard through one turn: a force-push to main blocked, a write to .env blocked, and a git reset --hard over uncommitted work put to the person, who declines; the band above the prompt counts each catch](docs/guard.gif)
+![clawd-guard through one real turn: a write to .env is blocked, then git checkout -- . over uncommitted work is put to the person, who declines; the band above the prompt shows each catch and counts them](docs/guard.gif)
+
+<sub>One real turn, recorded: Claude's Write to `.env` is blocked outright; `git checkout -- .` over an uncommitted edit asks first, and the person declines.</sub>
 
 - **Shell:** `rm -rf` on `/`, home, the project or anything outside it · force-push to `main`/`master` · deleting a protected branch · `git reset --hard`, `git clean -f` or `git checkout -- .` while you have uncommitted changes · `DROP`, `TRUNCATE` and `DELETE` without `WHERE` · `chmod 777` · `curl … | sh` · `wp db reset`, `wp search-replace` without `--dry-run` · `docker compose down -v` and other volume deletes
 - **Hidden commands:** what runs inside `bash -c "…"`, `eval`, `$(…)`, backticks and `xargs` is checked too, and `find -delete` counts as `rm -r` on the paths it searches.
@@ -84,6 +86,17 @@ Settings are read on every check, so an edit applies at once. Files are read in 
 - **It reads commands, it doesn't run a shell.** It splits the line at `;`, `&&`, `||` and `|`, and looks through `sudo` and `env`. A command hidden behind `eval`, a script file or an alias goes past it. Treat it as a seatbelt, not a sandbox.
 - **If the guard itself fails,** the call is refused with a message saying so, and `/guard off` gets you going again.
 - **Other plugins can read its counters:** clawd-statusbar or any other plugin can read `clawd-guard.denied`, `clawd-guard.asked` and `clawd-guard.last` from `$.state`.
+
+## The clawd family
+
+clawd-guard is one of seven plugins in the [`itsomidho` marketplace](https://github.com/itsomidho/claude-plugins); each works on its own:
+
+- [clawd-statusbar](https://github.com/itsomidho/clawd-statusbar): a framed status bar under the prompt: context, usage limits with reset times, git state, MR/PR pipeline status, and Clawd frying an egg while Claude works
+- [clawd-tasks](https://github.com/itsomidho/clawd-tasks): a live task board: Claude's plan, and under each task the steps it took, how long it ran, the files it changed and the agents it started
+- [clawd-notify](https://github.com/itsomidho/clawd-notify): tells you when Claude is done or needs you: a desktop notification, a chime, and optionally a push to your phone
+- [clawd-git](https://github.com/itsomidho/clawd-git): a live git panel beside the conversation: the file tree, changes, colored diffs and the commit graph; marks what Claude changed, stages, commits and asks Claude to review
+- [clawd-logs](https://github.com/itsomidho/clawd-logs): watches your project's error logs (WordPress debug.log, nginx, any log file): new errors show above the prompt, grouped, with a Fix button, and Claude hears about the ones its own work caused
+- [clawd-debug](https://github.com/itsomidho/clawd-debug): a step debugger beside the conversation: set a breakpoint, let Claude run your code with test data, and step line by line while every variable and line value shows
 
 ## License
 
